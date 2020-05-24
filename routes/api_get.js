@@ -126,6 +126,7 @@ var parseStatus = function(data){
 var parseUnloadingHistory = function(data){
   let newData = [];
   data.forEach((element,index) => {
+    delete element.result_qt;
     newData.push({
       id: index,
       type:"unloading-history",
@@ -135,8 +136,120 @@ var parseUnloadingHistory = function(data){
   return newData;
 };
 
+var parseContraptionHistory = function(data){
+  let newData = [];
+  data.forEach((element,index) => {
+    delete element.result_qt;
+    newData.push({
+      id: index,
+      type:"contraption-history",
+      attributes:element
+    });
+  });
+  return newData;
+};
+
+
+var parseMonthlyHistory = function(data){
+  let newData = [];
+  let filteredData = {};
+
+  data.forEach((element,index) => {
+    if(!filteredData[element.contraption_id]){
+      filteredData[element.contraption_id] = {
+        quantity:0,
+        contraption_denomination: element.contraption_denomination,
+        contraption_id_code: element.contraption_id_code,
+      };
+    }
+    filteredData[element.contraption_id].quantity += element.quantity;
+    filteredData[element.contraption_id].transaction_time = element.transaction_time;
+  });
+
+  for (const [key, value] of Object.entries(filteredData)) {
+    newData.push({
+      id: key,
+      type:"monthly-history",
+      attributes:value
+    });
+  }
+  return newData;
+};
+
+var parseEmployeeHistory = function(data){
+  let newData = [];
+  let filteredData = {};
+
+  data.forEach((element,index) => {
+    if(!filteredData[element.contraption_id]){
+      filteredData[element.contraption_id] = {
+        quantity:0,
+        employee_name:element.employee_name,
+        employee_id:element.employee_id,
+        employee_second_name: element.employee_second_name,
+        contraption_denomination: element.contraption_denomination,
+        contraption_id_code: element.contraption_id_code,
+        contraption_id:element.contraption_id
+      };
+    }
+    filteredData[element.contraption_id].quantity += element.quantity;
+    filteredData[element.contraption_id].transaction_time = element.transaction_time;
+  });
+
+  for (const [key, value] of Object.entries(filteredData)) {
+    newData.push({
+      id: key,
+      type:"employee-history",
+      attributes:value
+    });
+  }
+  return newData;
+};
+
+var parseYearHistory = function(data){
+  let newData = [];
+  let filteredData = {};
+
+  data.forEach((element,index) => {
+    if(!filteredData[element.contraption_id]){
+      filteredData[element.contraption_id] = {
+        quantity:0,
+        contraption_denomination: element.contraption_denomination,
+        contraption_id_code: element.contraption_id_code,
+      };
+    }
+    filteredData[element.contraption_id].quantity += element.quantity;
+    filteredData[element.contraption_id].transaction_time = element.transaction_time;
+  });
+
+  for (const [key, value] of Object.entries(filteredData)) {
+    newData.push({
+      id: key,
+      type:"monthly-history",
+      attributes:value
+    });
+  }
+  return newData;
+};
+
+var getQueryLike = function(queryRequestText){
+  let words = queryRequestText.split(',');
+  let queryLike = '';
+  words.forEach((item, i) => {
+    if(i === 0)
+    {
+      queryLike +=  `AND (LOWER(contraption.denomination) LIKE '%${item}%'`;
+    }
+    else{
+      queryLike +=  ` OR LOWER(contraption.denomination) LIKE '%${item}%'`;
+    }
+  });
+  queryLike+= ')';
+  return queryLike;
+};
+
 router.get('/operators', function(req, res, next) {
-  req.magazutDb.any('SELECT * FROM employee', [true])
+  req.magazutDb.any('SELECT * FROM employee ORDER BY second_name ASC', [true])
       .then(function(data) {
           res.send(parseOperator(data));
       })
@@ -188,7 +301,6 @@ router.get('/contraptions/:id(\\d+)/', function(req, res, next) {
       });
 });
 
-
 router.get('/contraptions', function(req, res, next) {
   const queryRequest = req.query;
   let data = {data:[]};
@@ -202,7 +314,8 @@ router.get('/contraptions', function(req, res, next) {
   }
   else if(queryRequest['id-code']){
     sqlQuery = `SELECT * FROM contraption
-      WHERE contraption.id_code LIKE '%${queryRequest["id-code"]}%'
+      WHERE LOWER(contraption.id_code) LIKE LOWER('%${queryRequest["id-code"]}%')
+      AND is_deleted = FALSE
       ORDER BY geometry_diameter ASC
       LIMIT ${itemForPage}
       OFFSET ${offset}
@@ -215,7 +328,10 @@ router.get('/contraptions', function(req, res, next) {
         WHERE (order_status = 0 OR order_status = 2)
         AND minimum_qt>0
         AND is_deleted = FALSE
-        ORDER BY geometry_diameter ASC
+        ORDER BY
+          order_status ASC,
+          type ASC,
+          geometry_diameter ASC
         LIMIT ${itemForPage}
         OFFSET ${offset}
         `;
@@ -225,11 +341,11 @@ router.get('/contraptions', function(req, res, next) {
     let degreeSearch = queryRequest['geometry_degree'] ? ` AND geometry_degree = ${queryRequest['geometry_degree']}` : '';
     let thicknessSearch = queryRequest['geometry_thickness'] ? ` AND geometry_thickness = ${queryRequest['geometry_thickness']}` : '';
     let lengthSearch = queryRequest['geometry_length'] ? ` AND geometry_length = ${queryRequest['geometry_length']}` : '';
-    let diameterSearch = queryRequest['geometry_diameter'] ? ` AND geometry_diameter = ${queryRequest['geometry_diameter']}` : '';
+    let diameterSearch = queryRequest['geometry_diameter'] ? ` AND geometry_diameter >= ${queryRequest['geometry_diameter']}` : '';
     let materialSearch = queryRequest['material'] ? ` AND material = ${queryRequest['material']}` : '';
     let typeSearch = queryRequest['contraption_type'] ? ` AND type IN (${queryRequest['contraption_type']})` : '';
     let machineSearch = queryRequest['machine'] ? ` AND machine IN (${queryRequest['machine']})` : '';
-    let textSearch = queryRequest['text'] ? ` AND contraption.denomination LIKE '%${queryRequest["text"]}%'`: '';
+    let textSearch = queryRequest['text'] ? getQueryLike(queryRequest['text']): '';
     let orderStatusSearch = queryRequest['order_status'] ? ` AND order_status = ${queryRequest['order_status']}` : '';
 
     let whereClause = ' WHERE is_deleted = FALSE ';
@@ -271,24 +387,47 @@ router.get('/contraptions', function(req, res, next) {
     });
 });
 
+var addPagination = function(data, result_qt, limit, pageQuery){
+  result_qt = result_qt ? Number(result_qt) : 0;
+  limit = Number(limit);
+
+  data.push({
+    id:0,
+    type:"pagination",
+    attributes:{
+      current_page:Number(pageQuery),
+      total_pages: result_qt > 0 ? Math.ceil(result_qt / limit) : 0,
+      items_for_page:limit,
+      items_showed: result_qt < limit ? result_qt : limit,
+      total_items:result_qt
+    }
+  });
+};
 
 router.get('/unloading-histories', function(req, res, next) {
   const queryRequest = req.query;
   let data = {data:[]};
-  let pageQuery= Number(queryRequest.page);
+  let pageQuery = (function(){
+    let temp = queryRequest.page ? Number(queryRequest.page) : 1;
+    if(temp < 1){
+      return 1;
+    }else{return temp}
+  }()); ;
   let limit = 15;
-  var offset = pageQuery * limit;
+  var offset = (pageQuery - 1) * limit;
   var sqlQuery = `SELECT
     transaction_time, involved_quantity, history.contraption_id,
     http_app_location, http_api_location, log, employee.name AS employee_name,
+    user_id,
     employee.second_name AS employee_second_name,
     contraption.denomination AS contraption_denomination,
-    contraption.id_code AS contraption_id_code
+    contraption.id_code AS contraption_id_code,
+    count(*) OVER() AS result_qt
 
     FROM history LEFT JOIN employee ON (user_id = employee_id) LEFT JOIN contraption ON (history.contraption_id = contraption.contraption_id)
 
     WHERE transaction_id=2
-    ORDER BY history_event_id ASC
+    ORDER BY history_event_id DESC
     LIMIT $2
     OFFSET $1`;
 
@@ -296,6 +435,7 @@ router.get('/unloading-histories', function(req, res, next) {
 
   req.magazutDb.any(sqlQuery, [offset, limit])
     .then(function(dbRes) {
+      addPagination(data.data, dbRes[0].result_qt, limit, pageQuery);
       data.data = data.data.concat(parseUnloadingHistory(dbRes));
       res.send(data);
     })
@@ -305,5 +445,179 @@ router.get('/unloading-histories', function(req, res, next) {
         res.send(sqlQuery);
     });
 });
+
+
+router.get('/monthly-histories', function(req, res, next) {
+  const queryRequest = req.query;
+  let data = {data:[]};
+  let pageQuery= Number(queryRequest.page);
+  var sqlQuery = `SELECT
+    involved_quantity AS quantity, history.contraption_id,
+    contraption.denomination AS contraption_denomination,
+    contraption.id_code AS contraption_id_code,
+    transaction_time
+
+    FROM history LEFT JOIN contraption ON (history.contraption_id = contraption.contraption_id)
+
+    WHERE transaction_id=2
+	  AND transaction_time < $1 AND transaction_time >= $2`;
+
+    console.log(sqlQuery);
+
+  let currentDate = new Date();
+  currentDate.setMonth(currentDate.getMonth() - pageQuery);
+  let currentYear = currentDate.getFullYear();
+  let currentMonth = currentDate.getMonth() + 1;
+
+
+  currentDate.setMonth(currentDate.getMonth() +1);
+  let nextYear = currentDate.getFullYear();
+  let nextMonth = currentDate.getMonth() + 1;
+
+  let currentDateString = `${currentYear}-${currentMonth}-01`;
+  let nextDateString = `${nextYear}-${nextMonth}-01`;
+
+
+  req.magazutDb.any(sqlQuery, [nextDateString, currentDateString])
+    .then(function(dbRes) {
+      data.data = data.data.concat(parseMonthlyHistory(dbRes));
+      res.send(data);
+    })
+    .catch(function(error) {
+      console.log('non funzia');
+      console.log(error);
+        res.send(sqlQuery);
+    });
+});
+
+
+router.get('/year-histories', function(req, res, next) {
+  const queryRequest = req.query;
+  let data = {data:[]};
+  let pageQuery= Number(queryRequest.page);
+  var sqlQuery = `SELECT
+    involved_quantity AS quantity, history.contraption_id,
+    contraption.denomination AS contraption_denomination,
+    contraption.id_code AS contraption_id_code,
+    transaction_time
+
+    FROM history LEFT JOIN contraption ON (history.contraption_id = contraption.contraption_id)
+
+    WHERE transaction_id=2
+	  AND transaction_time < $1 AND transaction_time >= $2`;
+
+    console.log(sqlQuery);
+
+  let currentDate = new Date();
+  // currentDate.setFullYear(currentDate.getFullYear() - pageQuery);
+  let currentYear = currentDate.getFullYear() - pageQuery;
+  let nextYear = currentYear + 1;
+
+  let currentDateString = `${currentYear}-01-01`;
+  let nextDateString = `${nextYear}-01-01`;
+
+
+  req.magazutDb.any(sqlQuery, [nextDateString, currentDateString])
+    .then(function(dbRes) {
+      data.data = data.data.concat(parseYearHistory(dbRes));
+      res.send(data);
+    })
+    .catch(function(error) {
+        res.send(sqlQuery);
+    });
+});
+
+
+
+router.get('/contraption-histories', function(req, res, next) {
+  const queryRequest = req.query;
+  const contraption_id = queryRequest.contraption_id;
+  let data = {data:[]};
+  let pageQuery = (function(){
+    let temp = queryRequest.page ? Number(queryRequest.page) : 1;
+    if(temp < 1){
+      return 1;
+    }else{return temp}
+  }());
+  let limit = queryRequest.items_for_page ? Number(queryRequest.items_for_page) : 25;
+  var offset = (pageQuery - 1) * limit;
+  var sqlQuery = `SELECT
+    transaction_time, involved_quantity, history.contraption_id,
+    employee.name AS employee_name,
+    employee.second_name AS employee_second_name,
+    contraption.denomination AS contraption_denomination,
+    contraption.id_code AS contraption_id_code,
+    transaction_id,
+    count(*) OVER() AS result_qt
+
+    FROM history LEFT JOIN employee ON (user_id = employee_id) LEFT JOIN contraption ON (history.contraption_id = contraption.contraption_id)
+
+    WHERE history.contraption_id=$3 AND transaction_id!=0
+    ORDER BY history_event_id DESC
+    LIMIT $2
+    OFFSET $1`;
+
+    console.log(sqlQuery);
+
+  req.magazutDb.any(sqlQuery, [offset, limit, contraption_id])
+    .then(function(dbRes) {
+      addPagination(data.data, dbRes[0].result_qt, limit, pageQuery);
+      data.data = data.data.concat(parseContraptionHistory(dbRes));
+      res.send(data);
+    })
+    .catch(function(error) {
+      console.log('non funzia');
+      console.log(error);
+        res.send(sqlQuery);
+    });
+});
+
+
+
+router.get('/employee-histories', function(req, res, next) {
+  const queryRequest = req.query;
+  let data = {data:[]};
+  const employee_id = queryRequest.employee_id;
+  let pageQuery = (function(){
+    let temp = queryRequest.page ? Number(queryRequest.page) : 1;
+    if(temp < 1){
+      return 1;
+    }else{return temp}
+  }());
+
+  let limit = queryRequest.items_for_page ? Number(queryRequest.items_for_page) : 25;
+  var offset = (pageQuery - 1) * limit;
+  var sqlQuery = `SELECT
+    involved_quantity AS quantity, history.contraption_id,
+    contraption.denomination AS contraption_denomination,
+    contraption.id_code AS contraption_id_code,
+    contraption.contraption_id,
+    transaction_time,
+    employee.name AS employee_name, employee.second_name AS employee_second_name, employee.employee_id AS employee_id,
+    count(*) OVER() AS result_qt
+
+    FROM history LEFT JOIN employee ON (user_id = employee_id) LEFT JOIN contraption ON (history.contraption_id = contraption.contraption_id)
+
+    WHERE history.user_id=$3
+
+    LIMIT $2
+    OFFSET $1
+    `;
+
+    console.log(sqlQuery);
+
+  req.magazutDb.any(sqlQuery,  [offset, limit, employee_id])
+    .then(function(dbRes) {
+      addPagination(data.data, dbRes[0].result_qt, limit, pageQuery);
+      data.data = data.data.concat(parseEmployeeHistory(dbRes));
+      res.send(data);
+    })
+    .catch(function(error) {
+      console.log('non funzia');
+      console.log(error);
+        res.send(sqlQuery);
+    });
+});
+
 
 module.exports = router;
